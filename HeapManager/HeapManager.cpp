@@ -4,27 +4,27 @@
 #include <vector>
 #include <string>
 
-class Block
-{
-public:
-	std::list<std::atomic_uint8_t>::iterator blockHead;
-	int size;
-
-	Block(std::list<std::atomic_uint8_t>::iterator head,int iBytes)
-	{
-		blockHead = head;
-		size = iBytes;
-	}
-};
-
 
 class HeapManager
 {
 private:
 	
-	int m_freeStoreSize;
+	std::atomic_int m_freeStoreSize;
 
 public:
+	class Block
+	{
+	public:
+		std::list<std::atomic_uint8_t>::iterator blockHead;
+		std::atomic_int size;
+
+		Block(std::list<std::atomic_uint8_t>::iterator head, int iBytes)
+		{
+			blockHead = head;
+			size = iBytes;
+		}
+	};
+
 	std::list<std::atomic_uint8_t>* m_freeStore;
 	std::list<std::atomic_uint8_t>::iterator m_freeHead;
 	HeapManager(int mBytes)
@@ -79,22 +79,30 @@ public:
 	}
 };
 
-int main()
+int main(int argc, char* argv[])
 {
-	HeapManager testHeap(10);
-	auto it = testHeap.m_freeStore->begin();
+	HeapManager* testHeap;
+	if(argc==1)
+	{
+		testHeap = new HeapManager((int)argv[0]);
+	}
+	else {
+		testHeap = new HeapManager(10);
+	}
+	
+	auto it = testHeap->m_freeStore->begin();
 	for (uint8_t i = 0; i < 100; i++)
 	{
 		*it = i;
 		it++;
 	}
 
-	Block *testBlock1 = reinterpret_cast<Block*>(testHeap.allocate(2));
+	HeapManager::Block *testBlock1 = reinterpret_cast<HeapManager::Block*>(testHeap->allocate(2));
 
-	std::cout << "\nTest block 1: " << &*testBlock1->blockHead << " " << testBlock1->size << " free Head: " << &*testHeap.m_freeHead;
+	std::cout << "\nTest block 1: " << &*testBlock1->blockHead << " " << testBlock1->size << " free Head: " << &*testHeap->m_freeHead;
 	
 
-	Block* testBlock2 = reinterpret_cast<Block*>(testHeap.allocate(3));
+	HeapManager::Block* testBlock2 = reinterpret_cast<HeapManager::Block*>(testHeap->allocate(3));
 	auto tb2it = testBlock2->blockHead;
 	for (uint8_t i = 0; i < testBlock2->size; i++) {
 		*tb2it = i + 100;
@@ -106,33 +114,34 @@ int main()
 		std::cout << "Tb2 [" << std::to_string(i) << "]=" << std::to_string((uint8_t)*tb2it) << ",";
 		tb2it = std::next(tb2it, 1);
 	}
-	std::cout << "\nTest block 2: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap.m_freeHead;
+	std::cout << "\nTest block 2: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap->m_freeHead;
 
-	testHeap.release(testBlock1);
+	testHeap->release(testBlock1);
 
-	std::cout << "\nTest block 2 after release of test block 1: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap.m_freeHead;
+	std::cout << "\nTest block 2 after release of test block 1: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap->m_freeHead;
 	tb2it = testBlock2->blockHead;
 	std::cout << "\n";
 	for (uint8_t i = 0; i < testBlock2->size; i++) {
 		std::cout << "Tb2 [" << std::to_string(i) << "]=" << std::to_string( (uint8_t) * tb2it )<< ",";
 		tb2it = std::next(tb2it, 1);
 	}
-	Block* testBlock3 = reinterpret_cast<Block*>(testHeap.allocate(5));
+	HeapManager::Block* testBlock3 = reinterpret_cast<HeapManager::Block*>(testHeap->allocate(5));
 
 	std::cout << "\nTest block 3: " << &*
-		testBlock3->blockHead << " " << testBlock3->size << " free Head: " << &*testHeap.m_freeHead;
+		testBlock3->blockHead << " " << testBlock3->size << " free Head: " << &*testHeap->m_freeHead;
 
-	testHeap.resize(testBlock2, 10);
+	testHeap->resize(testBlock2, 10);
 
-	std::cout << "\nTest block 2: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap.m_freeHead;
+	std::cout << "\nTest block 2: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap->m_freeHead;
 	tb2it = testBlock2->blockHead;
 	std::cout << "\n";
 	for (uint8_t i = 0; i < testBlock2->size; i++) {
 		std::cout << "Tb2 [" << std::to_string(i) << "]=" << std::to_string((uint8_t)*tb2it) << ",";
 		tb2it = std::next(tb2it, 1);
 	}
-	std::cout << "\nTest block 3: " << &*testBlock3->blockHead << " " << testBlock3->size << " free Head: " << &*testHeap.m_freeHead;
+	std::cout << "\nTest block 3: " << &*testBlock3->blockHead << " " << testBlock3->size << " free Head: " << &*testHeap->m_freeHead;
 
+	delete testHeap;
 	std::system("PAUSE");
 }
 

@@ -82,9 +82,10 @@ public:
 int main(int argc, char* argv[])
 {
 	HeapManager* testHeap;
-	if(argc==1)
+	if(argc>1)
 	{
-		testHeap = new HeapManager((int)argv[0]);
+		int heapSize = atoi(argv[1]);
+		testHeap = new HeapManager(heapSize);
 	}
 	else {
 		testHeap = new HeapManager(10);

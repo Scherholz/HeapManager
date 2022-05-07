@@ -3,37 +3,110 @@
 #include <atomic>
 #include <vector>
 
+
+class Block
+{
+public:
+	std::list<std::atomic_uint8_t>::iterator blockHead;
+	int size;
+
+	Block(std::list<std::atomic_uint8_t>::iterator head,int iBytes)
+	{
+		blockHead = head;
+		size = iBytes;
+	}
+};
+
+
 class HeapManager
 {
-private:     // 1 5 *>6 7 8 3 4
-	std::list<std::atomic_uint8_t> freeStore;
+private:     // [1] [2 3 4]  blockHead*>[5 6] blockHead*>[7 8 9 10] 11 12 13 14 //  //blockHead*>[5 6 7]
+	std::list<std::atomic_uint8_t> *m_freeStore;
+	
+	int m_freeStoreSize;
 
 public:
-
+	std::list<std::atomic_uint8_t>::iterator m_freeHead;
 	HeapManager(int mBytes)
 	{
+		m_freeStore = new std::list<std::atomic_uint8_t>(1000000 * mBytes);
+		m_freeHead = m_freeStore->begin();
+		m_freeStoreSize = 1000000*mBytes;
+	}
 
+	~HeapManager() 
+	{
+		delete m_freeStore;
 	}
 
 	void* allocate(int iBytes)// -allocate a contiguous block of of size iBytes
 	{
+		Block* newBlock = new Block(m_freeHead, iBytes);
+		std::advance(m_freeHead, iBytes);
 
+		return reinterpret_cast<void*>(newBlock);
 	}
-	bool release(void*)// -release a previously allocated block
+	bool release(void *block)// -release a previously allocated block
 	{
+		Block *blockToBeDelete = reinterpret_cast<Block*>(block);
+		int size = blockToBeDelete->size;
 
+		m_freeStore->erase(blockToBeDelete->blockHead, std::next(blockToBeDelete->blockHead,size));
+	
+		delete blockToBeDelete;
+
+		m_freeStore->resize(m_freeStoreSize);
+
+		return true;
 	}
 	void* resize(void* pBlock, int iNewSizeBytes)
 	{
+		Block* blockToBeResized= reinterpret_cast<Block*>(pBlock);
+		int size = blockToBeResized->size;
+		std::list<std::atomic_uint8_t> tempBlock(0);
+		std::list<std::atomic_uint8_t>::iterator blockHead = blockToBeResized->blockHead;		
+		std::list<std::atomic_uint8_t>::iterator blockEnd = std::next(blockHead, size);
+		
+		tempBlock.splice(tempBlock.begin(), *m_freeStore, blockHead, blockEnd);
+		
+		std::advance(m_freeHead, -size);
+		m_freeStore->splice(m_freeHead, tempBlock);
+		blockToBeResized->blockHead = m_freeHead;
+		blockToBeResized->size = iNewSizeBytes;
+		std::advance(m_freeHead, iNewSizeBytes);
 
+		return reinterpret_cast<void*>(true);
 	}
-
 };
-
 
 int main()
 {
-    std::cout << "Hello World!\n";
+	HeapManager testHeap(10);
+
+	Block *testBlock1 = reinterpret_cast<Block*>(testHeap.allocate(2));
+
+	std::cout << "\nTest block 1: " << &*testBlock1->blockHead << " " << testBlock1->size << " free Head: " << &*testHeap.m_freeHead;
+
+	Block* testBlock2 = reinterpret_cast<Block*>(testHeap.allocate(3));
+
+	std::cout << "\nTest block 2: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap.m_freeHead;
+
+	testHeap.release(testBlock1);
+
+	std::cout << "\nTest block 2 after release of test block 1: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap.m_freeHead;
+
+	Block* testBlock3 = reinterpret_cast<Block*>(testHeap.allocate(5));
+
+	std::cout << "\nTest block 3: " << &*
+		testBlock3->blockHead << " " << testBlock3->size << " free Head: " << &*testHeap.m_freeHead;
+
+	testHeap.resize(testBlock2, 10);
+
+	std::cout << "\nTest block 2: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap.m_freeHead;
+
+	std::cout << "\nTest block 3: " << &*testBlock3->blockHead << " " << testBlock3->size << " free Head: " << &*testHeap.m_freeHead;
+
+	std::system("PAUSE");
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu
@@ -66,7 +139,7 @@ For each part of the question below - provide a test that can be invoked from th
 	2. Add a 'resize' method with the following signature:
 	void *resize(void *pBlock, int iNewSizeBytes);
 
-
+	3. Modify your class so it is thread-safe.
 
 	4. Modify your class to, under all circumstances be capable of allocating all of the reserved memory. Provide a description of how this requirement is met and any
 	limitations that exist.

@@ -3,30 +3,104 @@
 #include <atomic>
 #include <vector>
 #include <string>
+#include <mutex>
+#include <thread>
 
+#define _EXCEPTION_WRITE_BIGGER_THAN_BLOCK std::exception("Size to write is bigger than block size")
 
 class HeapManager
 {
 private:
-	
+	std::list<std::atomic_uint8_t>* m_freeStore;
+	std::list<std::atomic_uint8_t>::iterator m_freeHead;
 	std::atomic_int m_freeStoreSize;
 
 public:
 	class Block
 	{
-	public:
+	private:
+		friend class HeapManager;
 		std::list<std::atomic_uint8_t>::iterator blockHead;
 		std::atomic_int size;
+		std::size_t integrityHash;
+		std::mutex blockMutex;
 
+	public:
 		Block(std::list<std::atomic_uint8_t>::iterator head, int iBytes)
 		{
 			blockHead = head;
 			size = iBytes;
+			std::vector<uint8_t> bytesToCheck;
+			auto blockIterator = blockHead;
+			for (int i = 0; i < size; i++) {
+				bytesToCheck.push_back(*blockIterator);
+				std::advance(blockIterator, 1);
+			}
+			integrityHash = std::hash<std::string>{}(std::string(bytesToCheck.begin(), bytesToCheck.end()));
+		}
+
+		std::atomic_int const getSize()
+		{
+			return size.load();
+		}
+
+		void writeBytes(std::vector<uint8_t> bytesToWrite)
+		{
+			std::lock_guard<std::mutex> guard(blockMutex);
+			std::cout << "\n writing from thread: " << std::this_thread::get_id() << "\n";
+			if (bytesToWrite.size() > size)
+			{
+				throw _EXCEPTION_WRITE_BIGGER_THAN_BLOCK;
+			}
+			auto writeIterator = blockHead;
+			for (auto valueToWrite : bytesToWrite) {
+				*writeIterator = valueToWrite;
+				std::advance(writeIterator, 1);
+			}
+			integrityHash = std::hash<std::string>{}(std::string(bytesToWrite.begin(), bytesToWrite.end()));
+		}
+
+		void dumpBlockInfo()
+		{
+			std::lock_guard<std::mutex> guard(blockMutex);
+			std::cout << "\nBlock size: " << size << " Block head: " << &blockHead;
+			auto blockIterator = blockHead;
+			std::cout << "\n";
+			for (int i = 0; i < size; i++) {
+				std::cout << "Value [" << std::to_string(i) << "]=" << std::to_string((uint8_t)*blockIterator) << ",";
+				std::advance(blockIterator, 1);
+			}
+			std::cout << "\n";
+		}
+
+		bool checkBlockIntegrity()
+		{
+			std::lock_guard<std::mutex> guard(blockMutex);
+			std::cout << "\n checking block integrity from thread: " << std::this_thread::get_id() <<"\n";
+			std::vector<uint8_t> bytesToCheck;
+			auto blockIterator = blockHead;
+			for (int i = 0; i < size; i++) {
+				bytesToCheck.push_back(*blockIterator);
+				std::advance(blockIterator, 1);
+			}
+			std::size_t checkHash = std::hash<std::string>{}(std::string(bytesToCheck.begin(), bytesToCheck.end()));
+			if(checkHash== integrityHash)
+			{
+				std::cout << "\n Block Integrity is ok!";
+				return true;
+			}
+			else {
+				std::cout << "\n Error: Block Integrity is corrupted.";
+				return false;
+			}
+		}
+
+		std::thread writeInThread(std::vector<uint8_t> bytesToWrite)
+		{
+			return std::thread([this, bytesToWrite] { this->writeBytes(bytesToWrite); });
 		}
 	};
 
-	std::list<std::atomic_uint8_t>* m_freeStore;
-	std::list<std::atomic_uint8_t>::iterator m_freeHead;
 	HeapManager(int mBytes)
 	{
 		m_freeStore = new std::list<std::atomic_uint8_t>(1000000 * mBytes);
@@ -90,58 +164,55 @@ int main(int argc, char* argv[])
 	else {
 		testHeap = new HeapManager(10);
 	}
-	
-	auto it = testHeap->m_freeStore->begin();
-	for (uint8_t i = 0; i < 100; i++)
-	{
-		*it = i;
-		it++;
-	}
 
 	HeapManager::Block *testBlock1 = reinterpret_cast<HeapManager::Block*>(testHeap->allocate(2));
 
-	std::cout << "\nTest block 1: " << &*testBlock1->blockHead << " " << testBlock1->size << " free Head: " << &*testHeap->m_freeHead;
+	std::cout << "\nTest block 1: ";
+	testBlock1->dumpBlockInfo();
 	
+	std::vector<uint8_t> testWrite{ 11,23 };
+	std::vector<uint8_t> testWrite2{ 22,55 };
+
+	std::thread t1 = testBlock1->writeInThread(testWrite);
+	testBlock1->checkBlockIntegrity();
+	std::thread t2 = testBlock1->writeInThread(testWrite2);
+	testBlock1->checkBlockIntegrity();
+
+	std::cout << "\nTest block 1 after write: ";
+	testBlock1->dumpBlockInfo();
+
+	std::vector<uint8_t> testWrite3{99,98,97};
+	try
+	{
+		testBlock1->writeBytes(testWrite3);
+	}
+	catch (std::exception &err) {
+		std::cout << "caught exception: " << err.what();
+	}
+
+	std::cout << "\nTest block 1 after exception: ";
+	testBlock1->dumpBlockInfo();
+	testBlock1->checkBlockIntegrity();
 
 	HeapManager::Block* testBlock2 = reinterpret_cast<HeapManager::Block*>(testHeap->allocate(3));
-	auto tb2it = testBlock2->blockHead;
-	for (uint8_t i = 0; i < testBlock2->size; i++) {
-		*tb2it = i + 100;
-		tb2it = std::next(tb2it, 1);
-	}
-	std::cout << "\n";
-	tb2it = testBlock2->blockHead;
-	for (uint8_t i = 0; i < testBlock2->size; i++) {
-		std::cout << "Tb2 [" << std::to_string(i) << "]=" << std::to_string((uint8_t)*tb2it) << ",";
-		tb2it = std::next(tb2it, 1);
-	}
-	std::cout << "\nTest block 2: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap->m_freeHead;
+
 
 	testHeap->release(testBlock1);
 
-	std::cout << "\nTest block 2 after release of test block 1: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap->m_freeHead;
-	tb2it = testBlock2->blockHead;
-	std::cout << "\n";
-	for (uint8_t i = 0; i < testBlock2->size; i++) {
-		std::cout << "Tb2 [" << std::to_string(i) << "]=" << std::to_string( (uint8_t) * tb2it )<< ",";
-		tb2it = std::next(tb2it, 1);
-	}
-	HeapManager::Block* testBlock3 = reinterpret_cast<HeapManager::Block*>(testHeap->allocate(5));
+	std::cout << "\nTest block 2 after release of test block 1: ";
+	testBlock2->dumpBlockInfo();
 
-	std::cout << "\nTest block 3: " << &*
-		testBlock3->blockHead << " " << testBlock3->size << " free Head: " << &*testHeap->m_freeHead;
+
+	HeapManager::Block* testBlock3 = reinterpret_cast<HeapManager::Block*>(testHeap->allocate(5));
 
 	testHeap->resize(testBlock2, 10);
 
-	std::cout << "\nTest block 2: " << &*testBlock2->blockHead << " " << testBlock2->size << " free Head: " << &*testHeap->m_freeHead;
-	tb2it = testBlock2->blockHead;
-	std::cout << "\n";
-	for (uint8_t i = 0; i < testBlock2->size; i++) {
-		std::cout << "Tb2 [" << std::to_string(i) << "]=" << std::to_string((uint8_t)*tb2it) << ",";
-		tb2it = std::next(tb2it, 1);
-	}
-	std::cout << "\nTest block 3: " << &*testBlock3->blockHead << " " << testBlock3->size << " free Head: " << &*testHeap->m_freeHead;
 
+	std::cout << "\nTest block 3: ";
+	testBlock3->dumpBlockInfo();
+
+	t1.join();
+	t2.join();
 	delete testHeap;
 	std::system("PAUSE");
 }

@@ -20,53 +20,53 @@ public:
 	{
 	private:
 		friend class HeapManager;
-		std::list<std::atomic_uint8_t>::iterator blockHead;
-		std::atomic_int size;
-		std::size_t integrityHash;
-		std::mutex blockMutex;
+		std::list<std::atomic_uint8_t>::iterator m_blockHead;
+		std::atomic_int m_size;
+		std::size_t m_integrityHash;
+		std::mutex m_blockMutex;
 
 	public:
 		Block(std::list<std::atomic_uint8_t>::iterator head, int iBytes)
 		{
-			blockHead = head;
-			size = iBytes;
+			m_blockHead = head;
+			m_size = iBytes;
 			std::vector<uint8_t> bytesToCheck;
-			auto blockIterator = blockHead;
-			for (int i = 0; i < size; i++) {
+			auto blockIterator = m_blockHead;
+			for (int i = 0; i < m_size; i++) {
 				bytesToCheck.push_back(*blockIterator);
 				std::advance(blockIterator, 1);
 			}
-			integrityHash = std::hash<std::string>{}(std::string(bytesToCheck.begin(), bytesToCheck.end()));
+			m_integrityHash = std::hash<std::string>{}(std::string(bytesToCheck.begin(), bytesToCheck.end()));
 		}
 
 		std::atomic_int const getSize()
 		{
-			return size.load();
+			return m_size.load();
 		}
 
 		void writeBytes(std::vector<uint8_t> bytesToWrite)
 		{
-			std::lock_guard<std::mutex> guard(blockMutex);
+			std::lock_guard<std::mutex> guard(m_blockMutex);
 			std::cout << "\n writing from thread: " << std::this_thread::get_id() << "\n";
-			if (bytesToWrite.size() > size)
+			if (bytesToWrite.size() > m_size)
 			{
 				throw _EXCEPTION_WRITE_BIGGER_THAN_BLOCK;
 			}
-			auto writeIterator = blockHead;
+			auto writeIterator = m_blockHead;
 			for (auto valueToWrite : bytesToWrite) {
 				*writeIterator = valueToWrite;
 				std::advance(writeIterator, 1);
 			}
-			integrityHash = std::hash<std::string>{}(std::string(bytesToWrite.begin(), bytesToWrite.end()));
+			m_integrityHash = std::hash<std::string>{}(std::string(bytesToWrite.begin(), bytesToWrite.end()));
 		}
 
 		void dumpBlockInfo()
 		{
-			std::lock_guard<std::mutex> guard(blockMutex);
-			std::cout << "\nBlock size: " << size << " Block head: " << &blockHead;
-			auto blockIterator = blockHead;
+			std::lock_guard<std::mutex> guard(m_blockMutex);
+			std::cout << "\nBlock size: " << m_size << " Block head: " << &m_blockHead;
+			auto blockIterator = m_blockHead;
 			std::cout << "\n";
-			for (int i = 0; i < size; i++) {
+			for (int i = 0; i < m_size; i++) {
 				std::cout << "Value [" << std::to_string(i) << "]=" << std::to_string((uint8_t)*blockIterator) << ",";
 				std::advance(blockIterator, 1);
 			}
@@ -75,16 +75,16 @@ public:
 
 		bool checkBlockIntegrity()
 		{
-			std::lock_guard<std::mutex> guard(blockMutex);
+			std::lock_guard<std::mutex> guard(m_blockMutex);
 			std::cout << "\n checking block integrity from thread: " << std::this_thread::get_id() <<"\n";
 			std::vector<uint8_t> bytesToCheck;
-			auto blockIterator = blockHead;
-			for (int i = 0; i < size; i++) {
+			auto blockIterator = m_blockHead;
+			for (int i = 0; i < m_size; i++) {
 				bytesToCheck.push_back(*blockIterator);
 				std::advance(blockIterator, 1);
 			}
 			std::size_t checkHash = std::hash<std::string>{}(std::string(bytesToCheck.begin(), bytesToCheck.end()));
-			if(checkHash== integrityHash)
+			if(checkHash== m_integrityHash)
 			{
 				std::cout << "\n Block Integrity is ok!";
 				return true;
@@ -123,9 +123,9 @@ public:
 	bool release(void *block)// -release a previously allocated block
 	{
 		Block *blockToBeDelete = reinterpret_cast<Block*>(block);
-		int size = blockToBeDelete->size;
+		int size = blockToBeDelete->m_size;
 
-		m_freeStore->erase(blockToBeDelete->blockHead, std::next(blockToBeDelete->blockHead,size));
+		m_freeStore->erase(blockToBeDelete->m_blockHead, std::next(blockToBeDelete->m_blockHead,size));
 	
 		delete blockToBeDelete;
 
@@ -136,17 +136,17 @@ public:
 	void* resize(void* pBlock, int iNewSizeBytes)
 	{
 		Block* blockToBeResized= reinterpret_cast<Block*>(pBlock);
-		int size = blockToBeResized->size;
+		int size = blockToBeResized->m_size;
 		std::list<std::atomic_uint8_t> tempBlock(0);
-		std::list<std::atomic_uint8_t>::iterator blockHead = blockToBeResized->blockHead;		
+		std::list<std::atomic_uint8_t>::iterator blockHead = blockToBeResized->m_blockHead;		
 		std::list<std::atomic_uint8_t>::iterator blockEnd = std::next(blockHead, size);
 		
 		tempBlock.splice(tempBlock.begin(), *m_freeStore, blockHead, blockEnd);
 		
 		m_freeStore->splice(m_freeHead, tempBlock);
 		std::advance(m_freeHead, -size);
-		blockToBeResized->blockHead = m_freeHead;
-		blockToBeResized->size = iNewSizeBytes;
+		blockToBeResized->m_blockHead = m_freeHead;
+		blockToBeResized->m_size = iNewSizeBytes;
 		std::advance(m_freeHead, iNewSizeBytes);
 
 		return reinterpret_cast<void*>(true);

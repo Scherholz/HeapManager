@@ -11,22 +11,22 @@
 class HeapManager
 {
 private:
-	std::list<std::atomic_uint8_t>* m_freeStore;
-	std::list<std::atomic_uint8_t>::iterator m_freeHead;
-	std::atomic_int m_freeStoreSize;
+	std::list<std::atomic_uint8_t>* m_freeStore;  // free store of the heap manager implemented as a List so that is is really good performance on block allocation / deallocation
+	std::list<std::atomic_uint8_t>::iterator m_freeHead; // allocated blocks stay to the left of the list and free ones to the right , free head tracks the first free block
+	std::atomic_int m_freeStoreSize; // current size of the free store
 
 public:
-	class Block
+	class Block // block class to track the relevant block information, the block itself is a series of blocks inside the Heap freeStore.
 	{
 	private:
 		friend class HeapManager;
-		std::list<std::atomic_uint8_t>::iterator m_blockHead;
-		std::atomic_int m_size;
-		std::size_t m_integrityHash;
-		std::mutex m_blockMutex;
+		std::list<std::atomic_uint8_t>::iterator m_blockHead; // pointer to the head of the block
+		std::atomic_int m_size; // size of the block 
+		std::size_t m_integrityHash; // integrity hash of the last time block was written to, so that we can check block integrity
+		std::mutex m_blockMutex; // block mutex for thread syncronization 
 
 	public:
-		Block(std::list<std::atomic_uint8_t>::iterator head, int iBytes)
+		Block(std::list<std::atomic_uint8_t>::iterator head, int iBytes) // initilizes block with head and size
 		{
 			m_blockHead = head;
 			m_size = iBytes;
@@ -44,9 +44,9 @@ public:
 			return m_size.load();
 		}
 
-		void writeBytes(std::vector<uint8_t> bytesToWrite)
+		void writeBytes(std::vector<uint8_t> bytesToWrite) // write bytes to block. 
 		{
-			std::lock_guard<std::mutex> guard(m_blockMutex);
+			std::lock_guard<std::mutex> guard(m_blockMutex); // lock guard for thread synchronization , all synchronization is achieved through lock guards
 			std::cout << "\n writing from thread: " << std::this_thread::get_id() << "\n";
 			if (bytesToWrite.size() > m_size)
 			{
@@ -54,15 +54,15 @@ public:
 			}
 			auto writeIterator = m_blockHead;
 			for (auto valueToWrite : bytesToWrite) {
-				*writeIterator = valueToWrite;
+				*writeIterator = valueToWrite;  // writes byte to block section
 				std::advance(writeIterator, 1);
 			}
-			m_integrityHash = std::hash<std::string>{}(std::string(bytesToWrite.begin(), bytesToWrite.end()));
+			m_integrityHash = std::hash<std::string>{}(std::string(bytesToWrite.begin(), bytesToWrite.end())); // calculates and stores current integrity hash
 		}
 
-		void dumpBlockInfo()
+		void dumpBlockInfo() // dumps block information to cout
 		{
-			std::lock_guard<std::mutex> guard(m_blockMutex);
+			std::lock_guard<std::mutex> guard(m_blockMutex); // lock guard for thread synchronization , all synchronization is achieved through lock guards
 			std::cout << "\nBlock size: " << m_size << " Block head: " << &m_blockHead;
 			auto blockIterator = m_blockHead;
 			std::cout << "\n";
@@ -73,9 +73,9 @@ public:
 			std::cout << "\n";
 		}
 
-		bool checkBlockIntegrity()
+		bool checkBlockIntegrity() // method to check block integrity
 		{
-			std::lock_guard<std::mutex> guard(m_blockMutex);
+			std::lock_guard<std::mutex> guard(m_blockMutex); // lock guard for thread synchronization , all synchronization is achieved through lock guards
 			std::cout << "\n checking block integrity from thread: " << std::this_thread::get_id() <<"\n";
 			std::vector<uint8_t> bytesToCheck;
 			auto blockIterator = m_blockHead;
@@ -83,7 +83,7 @@ public:
 				bytesToCheck.push_back(*blockIterator);
 				std::advance(blockIterator, 1);
 			}
-			std::size_t checkHash = std::hash<std::string>{}(std::string(bytesToCheck.begin(), bytesToCheck.end()));
+			std::size_t checkHash = std::hash<std::string>{}(std::string(bytesToCheck.begin(), bytesToCheck.end())); // calculate current hash to compare against stored m_integrityHash
 			if(checkHash== m_integrityHash)
 			{
 				std::cout << "\n Block Integrity is ok!";
@@ -95,13 +95,13 @@ public:
 			}
 		}
 
-		std::thread writeInThread(std::vector<uint8_t> bytesToWrite)
+		std::thread writeInThread(std::vector<uint8_t> bytesToWrite) // threaded write bytes to block method.
 		{
 			return std::thread([this, bytesToWrite] { this->writeBytes(bytesToWrite); });
 		}
 	};
 
-	HeapManager(int mBytes)
+	HeapManager(int mBytes) // initializes HeapManager with size mBytes in MB example: 10 = 10MB
 	{
 		m_freeStore = new std::list<std::atomic_uint8_t>(1000000 * mBytes);
 		m_freeHead = m_freeStore->begin();
@@ -113,14 +113,14 @@ public:
 		delete m_freeStore;
 	}
 
-	void* allocate(int iBytes)// -allocate a contiguous block of of size iBytes
+	void* allocate(int iBytes)//allocate a contiguous block of of size iBytes
 	{
 		Block* newBlock = new Block(m_freeHead, iBytes);
 		std::advance(m_freeHead, iBytes);
 
 		return reinterpret_cast<void*>(newBlock);
 	}
-	bool release(void *block)// -release a previously allocated block
+	bool release(void *block)//release a previously allocated block
 	{
 		Block *blockToBeDelete = reinterpret_cast<Block*>(block);
 		int size = blockToBeDelete->m_size;
@@ -133,7 +133,7 @@ public:
 
 		return true;
 	}
-	void* resize(void* pBlock, int iNewSizeBytes)
+	void* resize(void* pBlock, int iNewSizeBytes) // resizes a previously allocated block
 	{
 		Block* blockToBeResized= reinterpret_cast<Block*>(pBlock);
 		int size = blockToBeResized->m_size;
